@@ -6,7 +6,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+api_key = os.getenv("ANTHROPIC_API_KEY")
+print(f"API KEY FOUND: {bool(api_key)}")
+client = anthropic.Anthropic(api_key=api_key)
 
 FORM_PAGE = """
 <!DOCTYPE html>
