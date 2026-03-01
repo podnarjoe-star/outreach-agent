@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv(override=False)
 
 app = Flask(__name__)
-api_key = "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"
+api_key = os.environ.get("ANTHROPIC_API_KEY")
 print(f"API KEY FOUND: {bool(api_key)}")
 client = anthropic.Anthropic(api_key=api_key)
 
