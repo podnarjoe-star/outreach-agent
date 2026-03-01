@@ -3,7 +3,7 @@ import anthropic
 from flask import Flask, request, render_template_string
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=False)
 
 app = Flask(__name__)
 api_key = os.getenv("ANTHROPIC_API_KEY")
