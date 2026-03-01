@@ -7,8 +7,6 @@ load_dotenv(override=False)
 
 app = Flask(__name__)
 api_key = os.environ.get("anthropic_api_key")
-print(f"API KEY FOUND: {bool(api_key)}")
-print(f"ALL ENV VARS: {list(os.environ.keys())}")
 client = anthropic.Anthropic(api_key=api_key)
 
 FORM_PAGE = """
