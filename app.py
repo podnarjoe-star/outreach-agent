@@ -2,13 +2,47 @@ import os
 import json
 import base64
 import anthropic
-from flask import Flask, request, render_template_string
+import mysql.connector
+from flask import Flask, request, render_template_string, redirect, url_for
 from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from email.mime.text import MIMEText
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 client = anthropic.Anthropic(api_key=os.environ.get("anthropic_api_key"))
+
+def get_db():
+    return mysql.connector.connect(
+        host=os.environ.get("MYSQLHOST"),
+        user=os.environ.get("MYSQLUSER"),
+        password=os.environ.get("MYSQLPASSWORD"),
+        database=os.environ.get("MYSQLDATABASE"),
+        port=int(os.environ.get("MYSQLPORT", 3306))
+    )
+
+def init_db():
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS businesses (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(255),
+            website VARCHAR(255),
+            email VARCHAR(255),
+            type VARCHAR(255),
+            status VARCHAR(50) DEFAULT 'contacted',
+            date_first_contacted DATE,
+            date_last_contacted DATE,
+            followup_due DATE,
+            outreach_count INT DEFAULT 1,
+            notes TEXT
+        )
+    """)
+    db.commit()
+    cursor.close()
+    db.close()
 
 def get_gmail_service():
     token_json = os.environ.get("GMAIL_TOKEN")
@@ -21,6 +55,8 @@ def get_gmail_service():
         client_secret=creds_data["client_secret"],
         scopes=creds_data["scopes"]
     )
+    if creds.expired and creds.refresh_token:
+        creds.refresh(Request())
     return build("gmail", "v1", credentials=creds)
 
 def send_email(to, subject, body):
@@ -37,6 +73,7 @@ FORM_PAGE = """
 <head><title>Outreach Agent</title></head>
 <body style="font-family: Arial; max-width: 600px; margin: 50px auto; padding: 20px;">
     <h2>Draft Outreach Email</h2>
+    <a href="/dashboard" style="float:right;">View Dashboard</a>
     <form method="POST" action="/draft">
         <label>Business Name:</label><br>
         <input type="text" name="business_name" style="width:100%; padding:8px; margin:8px 0;"><br>
@@ -61,6 +98,8 @@ DRAFT_PAGE = """
     <form method="POST" action="/approve">
         <input type="hidden" name="business_email" value="{{ business_email }}">
         <input type="hidden" name="business_name" value="{{ business_name }}">
+        <input type="hidden" name="business_website" value="{{ business_website }}">
+        <input type="hidden" name="business_type" value="{{ business_type }}">
         <label><strong>To:</strong> {{ business_email }}</label><br><br>
         <label><strong>Subject:</strong></label><br>
         <input type="text" name="subject" value="{{ subject }}" style="width:100%; padding:8px; margin:8px 0;"><br>
@@ -79,7 +118,69 @@ SENT_PAGE = """
 <body style="font-family: Arial; max-width: 600px; margin: 50px auto; padding: 20px;">
     <h2>Email Sent!</h2>
     <p>Your outreach email to <strong>{{ business_name }}</strong> has been sent successfully.</p>
-    <a href="/">Draft another email</a>
+    <p>Follow-up scheduled for 3 days from now if no response.</p>
+    <a href="/">Draft another email</a> | <a href="/dashboard">View Dashboard</a>
+</body>
+</html>
+"""
+
+DASHBOARD_PAGE = """
+<!DOCTYPE html>
+<html>
+<head><title>Dashboard</title>
+<style>
+    body { font-family: Arial; max-width: 1000px; margin: 50px auto; padding: 20px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 10px; border: 1px solid #ddd; text-align: left; }
+    th { background: #f4f4f4; }
+    .contacted { background: #fff9c4; }
+    .responded { background: #c8e6c9; }
+    .not_interested { background: #ffcdd2; }
+    .converted { background: #bbdefb; }
+    .followup-due { font-weight: bold; color: red; }
+</style>
+</head>
+<body>
+    <h2>Outreach Dashboard</h2>
+    <a href="/">+ New Outreach</a>
+    <br><br>
+    <table>
+        <tr>
+            <th>Business</th>
+            <th>Type</th>
+            <th>Email</th>
+            <th>Status</th>
+            <th>First Contacted</th>
+            <th>Last Contacted</th>
+            <th>Follow-up Due</th>
+            <th>Outreach Count</th>
+            <th>Update Status</th>
+        </tr>
+        {% for b in businesses %}
+        <tr class="{{ b['status'] }}">
+            <td><a href="{{ b['website'] }}" target="_blank">{{ b['name'] }}</a></td>
+            <td>{{ b['type'] }}</td>
+            <td>{{ b['email'] }}</td>
+            <td>{{ b['status'] }}</td>
+            <td>{{ b['date_first_contacted'] }}</td>
+            <td>{{ b['date_last_contacted'] }}</td>
+            <td class="{{ 'followup-due' if b['followup_due'] and b['followup_due'] <= today else '' }}">{{ b['followup_due'] }}</td>
+            <td>{{ b['outreach_count'] }}</td>
+            <td>
+                <form method="POST" action="/update_status">
+                    <input type="hidden" name="business_id" value="{{ b['id'] }}">
+                    <select name="status">
+                        <option value="contacted" {{ 'selected' if b['status'] == 'contacted' }}>Contacted</option>
+                        <option value="responded" {{ 'selected' if b['status'] == 'responded' }}>Responded</option>
+                        <option value="not_interested" {{ 'selected' if b['status'] == 'not_interested' }}>Not Interested</option>
+                        <option value="converted" {{ 'selected' if b['status'] == 'converted' }}>Converted</option>
+                    </select>
+                    <button type="submit">Update</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
 </body>
 </html>
 """
@@ -119,26 +220,62 @@ def draft():
     business_website = request.form["business_website"]
     business_type = request.form["business_type"]
     business_email = request.form.get("business_email", "")
-    
     email_body = draft_outreach_email(business_name, business_website, business_type)
     subject = f"Quick question for {business_name}"
-    
     return render_template_string(DRAFT_PAGE,
                                    email_body=email_body,
                                    business_name=business_name,
                                    business_email=business_email,
+                                   business_website=business_website,
+                                   business_type=business_type,
                                    subject=subject)
 
 @app.route("/approve", methods=["POST"])
 def approve():
     business_name = request.form["business_name"]
     business_email = request.form["business_email"]
+    business_website = request.form["business_website"]
+    business_type = request.form["business_type"]
     email_body = request.form["email_body"]
     subject = request.form["subject"]
-    
     send_email(business_email, subject, email_body)
-    
+    today = datetime.today().date()
+    followup_due = today + timedelta(days=3)
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("""
+        INSERT INTO businesses (name, website, email, type, status, date_first_contacted, date_last_contacted, followup_due, outreach_count)
+        VALUES (%s, %s, %s, %s, 'contacted', %s, %s, %s, 1)
+    """, (business_name, business_website, business_email, business_type, today, today, followup_due))
+    db.commit()
+    cursor.close()
+    db.close()
     return render_template_string(SENT_PAGE, business_name=business_name)
+
+@app.route("/dashboard")
+def dashboard():
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM businesses ORDER BY followup_due ASC")
+    businesses = cursor.fetchall()
+    cursor.close()
+    db.close()
+    today = datetime.today().date()
+    return render_template_string(DASHBOARD_PAGE, businesses=businesses, today=today)
+
+@app.route("/update_status", methods=["POST"])
+def update_status():
+    business_id = request.form["business_id"]
+    status = request.form["status"]
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("UPDATE businesses SET status = %s WHERE id = %s", (status, business_id))
+    db.commit()
+    cursor.close()
+    db.close()
+    return redirect(url_for("dashboard"))
+
+init_db()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
