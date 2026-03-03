@@ -320,29 +320,31 @@ def update_status():
     return redirect(url_for("dashboard"))
 
 @app.route("/find_businesses", methods=["POST"])
-def find_businesses_route():
-    city = request.form["city"]
-    business_type = request.form["business_type"]
-    businesses = find_businesses(city, business_type)
-    
-    # Add to database with 'pending' status
-    db = get_db()
-    cursor = db.cursor()
-    added = 0
-    for b in businesses:
-        # Check if already exists
-        cursor.execute("SELECT id FROM businesses WHERE name = %s", (b["name"],))
-        if not cursor.fetchone():
-            cursor.execute("""
-                INSERT INTO businesses (name, website, email, type, status, date_first_contacted, date_last_contacted, followup_due, outreach_count)
-                VALUES (%s, %s, %s, %s, 'pending', NULL, NULL, NULL, 0)
-            """, (b["name"], b["website"], "", b["type"]))
-            added += 1
-    db.commit()
-    cursor.close()
-    db.close()
-    
-    return redirect(url_for("dashboard") + f"?found={added}&city={city}")
+def find_businesses(city, business_type):
+    api_key = os.environ.get("GOOGLE_PLACES_API_KEY")
+    url = "https://places.googleapis.com/v1/places:searchText"
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": api_key,
+        "X-Goog-FieldMask": "places.displayName,places.websiteUri,places.formattedAddress,places.id"
+    }
+    data = {
+        "textQuery": f"{business_type} in {city}"
+    }
+    response = requests.post(url, headers=headers, json=data)
+    results = response.json().get("places", [])
+    businesses = []
+    for place in results[:10]:
+        name = place.get("displayName", {}).get("text", "")
+        website = place.get("websiteUri", "")
+        address = place.get("formattedAddress", "")
+        businesses.append({
+            "name": name,
+            "address": address,
+            "website": website,
+            "type": business_type
+        })
+    return businesses
 
 init_db()
 
