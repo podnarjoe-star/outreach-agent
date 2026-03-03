@@ -222,7 +222,7 @@ Return only the email body, no subject line."""
     )
     return message.content[0].text
 
-def find_businesses(city, business_type):
+def search_places(city, business_type):
     api_key = os.environ.get("GOOGLE_PLACES_API_KEY")
     query = f"{business_type} in {city}"
     url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
@@ -320,7 +320,7 @@ def update_status():
     return redirect(url_for("dashboard"))
 
 @app.route("/find_businesses", methods=["POST"])
-def find_businesses(city, business_type):
+def search_places(city, business_type):
     api_key = os.environ.get("GOOGLE_PLACES_API_KEY")
     url = "https://places.googleapis.com/v1/places:searchText"
     headers = {
