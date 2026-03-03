@@ -320,7 +320,7 @@ def update_status():
     return redirect(url_for("dashboard"))
 
 @app.route("/find_businesses", methods=["POST"])
-def search_places(city, business_type):
+def find_businesses_route():
     api_key = os.environ.get("GOOGLE_PLACES_API_KEY")
     url = "https://places.googleapis.com/v1/places:searchText"
     headers = {
