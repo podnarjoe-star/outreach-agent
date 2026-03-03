@@ -301,6 +301,30 @@ def dashboard():
     today = datetime.today().date()
     return render_template_string(DASHBOARD_PAGE, businesses=businesses, today=today)
 
+@app.route("/check_replies")
+def check_replies():
+    service = get_gmail_service()
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM businesses WHERE status = 'contacted'")
+    businesses = cursor.fetchall()
+    updated = 0
+    for business in businesses:
+        if not business["email"]:
+            continue
+        query = f"from:{business['email']}"
+        results = service.users().messages().list(userId="me", q=query).execute()
+        messages = results.get("messages", [])
+        if messages:
+            cursor2 = db.cursor()
+            cursor2.execute("UPDATE businesses SET status = 'responded' WHERE id = %s", (business["id"],))
+            db.commit()
+            cursor2.close()
+            updated += 1
+    cursor.close()
+    db.close()
+    return f"Checked replies. {updated} businesses updated to responded."
+
 @app.route("/update_status", methods=["POST"])
 def update_status():
     business_id = request.form["business_id"]
