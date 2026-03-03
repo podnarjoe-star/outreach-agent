@@ -233,6 +233,7 @@ def search_places(city, business_type):
     }
     data = {"textQuery": query}
     response = requests.post(url, headers=headers, json=data)
+    print(f"Places API response: {response.json()}")
     results = response.json().get("places", [])
     businesses = []
     for place in results[:10]:
