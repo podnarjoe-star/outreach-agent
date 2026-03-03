@@ -3,6 +3,7 @@ import json
 import base64
 import anthropic
 import mysql.connector
+import requests
 from flask import Flask, request, render_template_string, redirect, url_for
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -84,6 +85,17 @@ FORM_PAGE = """
         <label>Business Email:</label><br>
         <input type="text" name="business_email" style="width:100%; padding:8px; margin:8px 0;"><br>
         <button type="submit" style="padding:10px 20px; background:#4CAF50; color:white; border:none; cursor:pointer;">Draft Email</button>
+    </form>
+
+    <hr style="margin: 40px 0;">
+
+    <h2>Find Businesses</h2>
+    <form method="POST" action="/find_businesses">
+        <label>City:</label><br>
+        <input type="text" name="city" placeholder="e.g. Cincinnati, OH" style="width:100%; padding:8px; margin:8px 0;"><br>
+        <label>Business Type:</label><br>
+        <input type="text" name="business_type" placeholder="e.g. hair salon, spa, esthetician" style="width:100%; padding:8px; margin:8px 0;"><br>
+        <button type="submit" style="padding:10px 20px; background:#2196F3; color:white; border:none; cursor:pointer;">Find Businesses</button>
     </form>
 </body>
 </html>
@@ -210,6 +222,38 @@ Return only the email body, no subject line."""
     )
     return message.content[0].text
 
+def find_businesses(city, business_type):
+    api_key = os.environ.get("GOOGLE_PLACES_API_KEY")
+    query = f"{business_type} in {city}"
+    url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+    params = {
+        "query": query,
+        "key": api_key
+    }
+    response = requests.get(url, params=params)
+    results = response.json().get("results", [])
+    businesses = []
+    for place in results[:10]:
+        name = place.get("name")
+        address = place.get("formatted_address")
+        place_id = place.get("place_id")
+        # Get website and phone from place details
+        details_url = "https://maps.googleapis.com/maps/api/place/details/json"
+        details_params = {
+            "place_id": place_id,
+            "fields": "name,website,formatted_phone_number",
+            "key": api_key
+        }
+        details = requests.get(details_url, params=details_params).json().get("result", {})
+        website = details.get("website", "")
+        businesses.append({
+            "name": name,
+            "address": address,
+            "website": website,
+            "type": business_type
+        })
+    return businesses
+
 @app.route("/")
 def index():
     return render_template_string(FORM_PAGE)
@@ -274,6 +318,31 @@ def update_status():
     cursor.close()
     db.close()
     return redirect(url_for("dashboard"))
+
+@app.route("/find_businesses", methods=["POST"])
+def find_businesses_route():
+    city = request.form["city"]
+    business_type = request.form["business_type"]
+    businesses = find_businesses(city, business_type)
+    
+    # Add to database with 'pending' status
+    db = get_db()
+    cursor = db.cursor()
+    added = 0
+    for b in businesses:
+        # Check if already exists
+        cursor.execute("SELECT id FROM businesses WHERE name = %s", (b["name"],))
+        if not cursor.fetchone():
+            cursor.execute("""
+                INSERT INTO businesses (name, website, email, type, status, date_first_contacted, date_last_contacted, followup_due, outreach_count)
+                VALUES (%s, %s, %s, %s, 'pending', NULL, NULL, NULL, 0)
+            """, (b["name"], b["website"], "", b["type"]))
+            added += 1
+    db.commit()
+    cursor.close()
+    db.close()
+    
+    return redirect(url_for("dashboard") + f"?found={added}&city={city}")
 
 init_db()
 
