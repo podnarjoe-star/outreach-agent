@@ -321,6 +321,9 @@ def update_status():
 
 @app.route("/find_businesses", methods=["POST"])
 def find_businesses_route():
+    city = request.form["city"]
+    business_type = request.form["business_type"]
+    businesses = search_places(city, business_type)
     api_key = os.environ.get("GOOGLE_PLACES_API_KEY")
     url = "https://places.googleapis.com/v1/places:searchText"
     headers = {
