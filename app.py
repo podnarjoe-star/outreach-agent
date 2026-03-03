@@ -225,27 +225,20 @@ Return only the email body, no subject line."""
 def search_places(city, business_type):
     api_key = os.environ.get("GOOGLE_PLACES_API_KEY")
     query = f"{business_type} in {city}"
-    url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
-    params = {
-        "query": query,
-        "key": api_key
+    url = "https://places.googleapis.com/v1/places:searchText"
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": api_key,
+        "X-Goog-FieldMask": "places.displayName,places.websiteUri,places.formattedAddress,places.id"
     }
-    response = requests.get(url, params=params)
-    results = response.json().get("results", [])
+    data = {"textQuery": query}
+    response = requests.post(url, headers=headers, json=data)
+    results = response.json().get("places", [])
     businesses = []
     for place in results[:10]:
-        name = place.get("name")
-        address = place.get("formatted_address")
-        place_id = place.get("place_id")
-        # Get website and phone from place details
-        details_url = "https://maps.googleapis.com/maps/api/place/details/json"
-        details_params = {
-            "place_id": place_id,
-            "fields": "name,website,formatted_phone_number",
-            "key": api_key
-        }
-        details = requests.get(details_url, params=details_params).json().get("result", {})
-        website = details.get("website", "")
+        name = place.get("displayName", {}).get("text", "")
+        website = place.get("websiteUri", "")
+        address = place.get("formattedAddress", "")
         businesses.append({
             "name": name,
             "address": address,
@@ -339,3 +332,9 @@ def find_businesses_route():
     cursor.close()
     db.close()
     return redirect(url_for("dashboard") + f"?found={added}&city={city}")
+
+init_db()
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
