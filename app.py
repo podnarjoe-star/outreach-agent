@@ -1,6 +1,7 @@
 import os
 from flask import Flask, request, render_template_string, redirect, url_for
 from datetime import datetime, timedelta
+from apscheduler.schedulers.background import BackgroundScheduler
 from database import get_db, init_db
 from email_utils import get_gmail_service, send_email
 from places import search_places
@@ -317,6 +318,83 @@ def find_businesses_route():
     cursor.close()
     db.close()
     return redirect(url_for("dashboard") + f"?found={added}&city={city}")
+
+def scheduled_check_replies():
+    with app.app_context():
+        try:
+            service = get_gmail_service()
+            db = get_db()
+            cursor = db.cursor(dictionary=True)
+            cursor.execute("SELECT * FROM businesses WHERE status = 'contacted'")
+            businesses = cursor.fetchall()
+            for business in businesses:
+                if not business["email"]:
+                    continue
+                query = f"from:{business['email']}"
+                results = service.users().messages().list(userId="me", q=query).execute()
+                messages = results.get("messages", [])
+                if messages:
+                    cursor2 = db.cursor()
+                    cursor2.execute("UPDATE businesses SET status = 'responded' WHERE id = %s", (business["id"],))
+                    db.commit()
+                    cursor2.close()
+            cursor.close()
+            db.close()
+            print("Scheduled reply check complete.")
+        except Exception as e:
+            print(f"Error in scheduled_check_replies: {e}")
+
+def scheduled_check_followups():
+    with app.app_context():
+        try:
+            db = get_db()
+            cursor = db.cursor(dictionary=True)
+            today = datetime.today().date()
+            cursor.execute("""
+                SELECT * FROM businesses
+                WHERE status = 'contacted'
+                AND followup_due IS NOT NULL
+                AND followup_due <= %s
+            """, (today,))
+            businesses = cursor.fetchall()
+            cursor.close()
+            db.close()
+            for business in businesses:
+                followup_body = draft_followup_email(business["name"], business["type"], business["outreach_count"] + 1)
+                subject = f"Following up - {business['name']}"
+                approval_body = f"""A follow-up email is ready for your approval.
+
+Business: {business['name']}
+Email: {business['email']}
+Subject: {subject}
+
+--- DRAFT ---
+{followup_body}
+--- END DRAFT ---
+
+To approve and send, visit:
+https://outreach-agent-production.up.railway.app/approve_followup?id={business['id']}
+"""
+                send_email("podnarjoe@gmail.com", f"Follow-up ready for approval: {business['name']}", approval_body)
+                db = get_db()
+                cursor = db.cursor()
+                new_followup_due = today + timedelta(days=3)
+                cursor.execute("""
+                    UPDATE businesses
+                    SET followup_due = %s, outreach_count = outreach_count + 1, date_last_contacted = %s
+                    WHERE id = %s
+                """, (new_followup_due, today, business["id"]))
+                db.commit()
+                cursor.close()
+                db.close()
+            print(f"Scheduled followup check complete. {len(businesses)} businesses processed.")
+        except Exception as e:
+            print(f"Error in scheduled_check_followups: {e}")
+
+scheduler = BackgroundScheduler()
+scheduler.add_job(scheduled_check_replies, 'interval', hours=1)
+scheduler.add_job(scheduled_check_followups, 'cron', hour=9, minute=0)
+scheduler.start()
 
 init_db()
 
