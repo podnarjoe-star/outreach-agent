@@ -1,72 +1,12 @@
 import os
-import json
-import base64
-import anthropic
-import mysql.connector
-import requests
 from flask import Flask, request, render_template_string, redirect, url_for
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
-from googleapiclient.discovery import build
-from email.mime.text import MIMEText
 from datetime import datetime, timedelta
+from database import get_db, init_db
+from email_utils import get_gmail_service, send_email
+from places import search_places
+from ai import draft_outreach_email, draft_followup_email
 
 app = Flask(__name__)
-client = anthropic.Anthropic(api_key=os.environ.get("anthropic_api_key"))
-
-def get_db():
-    return mysql.connector.connect(
-        host=os.environ.get("MYSQLHOST"),
-        user=os.environ.get("MYSQLUSER"),
-        password=os.environ.get("MYSQLPASSWORD"),
-        database=os.environ.get("MYSQLDATABASE"),
-        port=int(os.environ.get("MYSQLPORT", 3306))
-    )
-
-def init_db():
-    db = get_db()
-    cursor = db.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS businesses (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            name VARCHAR(255),
-            website VARCHAR(255),
-            email VARCHAR(255),
-            type VARCHAR(255),
-            status VARCHAR(50) DEFAULT 'contacted',
-            date_first_contacted DATE,
-            date_last_contacted DATE,
-            followup_due DATE,
-            outreach_count INT DEFAULT 1,
-            notes TEXT
-        )
-    """)
-    db.commit()
-    cursor.close()
-    db.close()
-
-def get_gmail_service():
-    token_json = os.environ.get("GMAIL_TOKEN")
-    creds_data = json.loads(token_json)
-    creds = Credentials(
-        token=creds_data["token"],
-        refresh_token=creds_data["refresh_token"],
-        token_uri=creds_data["token_uri"],
-        client_id=creds_data["client_id"],
-        client_secret=creds_data["client_secret"],
-        scopes=creds_data["scopes"]
-    )
-    if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-    return build("gmail", "v1", credentials=creds)
-
-def send_email(to, subject, body):
-    service = get_gmail_service()
-    message = MIMEText(body)
-    message["to"] = to
-    message["subject"] = subject
-    raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
-    service.users().messages().send(userId="me", body={"raw": raw}).execute()
 
 FORM_PAGE = """
 <!DOCTYPE html>
@@ -149,12 +89,15 @@ DASHBOARD_PAGE = """
     .responded { background: #c8e6c9; }
     .not_interested { background: #ffcdd2; }
     .converted { background: #bbdefb; }
+    .pending { background: #f3e5f5; }
     .followup-due { font-weight: bold; color: red; }
 </style>
 </head>
 <body>
     <h2>Outreach Dashboard</h2>
-    <a href="/">+ New Outreach</a>
+    <a href="/">+ New Outreach</a> |
+    <a href="/check_replies">Check Replies</a> |
+    <a href="/check_followups">Check Follow-ups</a>
     <br><br>
     <table>
         <tr>
@@ -182,6 +125,7 @@ DASHBOARD_PAGE = """
                 <form method="POST" action="/update_status">
                     <input type="hidden" name="business_id" value="{{ b['id'] }}">
                     <select name="status">
+                        <option value="pending" {{ 'selected' if b['status'] == 'pending' }}>Pending</option>
                         <option value="contacted" {{ 'selected' if b['status'] == 'contacted' }}>Contacted</option>
                         <option value="responded" {{ 'selected' if b['status'] == 'responded' }}>Responded</option>
                         <option value="not_interested" {{ 'selected' if b['status'] == 'not_interested' }}>Not Interested</option>
@@ -196,57 +140,6 @@ DASHBOARD_PAGE = """
 </body>
 </html>
 """
-
-def draft_outreach_email(business_name, business_website, business_type):
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1024,
-        messages=[
-            {
-                "role": "user",
-                "content": f"""You are helping draft a personalized cold outreach email to a small beauty/wellness business.
-
-Business Name: {business_name}
-Business Website: {business_website}
-Business Type: {business_type}
-
-Draft a short, friendly, personalized outreach email introducing a service that creates a 24/7 online booking page for their clients.
-- Keep it under 150 words
-- Sound human, not salesy
-- Reference something specific about their business
-- End with a simple call to action
-
-Return only the email body, no subject line."""
-            }
-        ]
-    )
-    return message.content[0].text
-
-def search_places(city, business_type):
-    api_key = os.environ.get("GOOGLE_PLACES_API_KEY")
-    query = f"{business_type} in {city}"
-    url = "https://places.googleapis.com/v1/places:searchText"
-    headers = {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": api_key,
-        "X-Goog-FieldMask": "places.displayName,places.websiteUri,places.formattedAddress,places.id"
-    }
-    data = {"textQuery": query}
-    response = requests.post(url, headers=headers, json=data)
-    print(f"Places API response: {response.json()}")
-    results = response.json().get("places", [])
-    businesses = []
-    for place in results[:10]:
-        name = place.get("displayName", {}).get("text", "")
-        website = place.get("websiteUri", "")
-        address = place.get("formattedAddress", "")
-        businesses.append({
-            "name": name,
-            "address": address,
-            "website": website,
-            "type": business_type
-        })
-    return businesses
 
 @app.route("/")
 def index():
@@ -457,6 +350,97 @@ def update_status():
     cursor.close()
     db.close()
     return redirect(url_for("dashboard"))
+
+@app.route("/check_replies")
+def check_replies():
+    service = get_gmail_service()
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM businesses WHERE status = 'contacted'")
+    businesses = cursor.fetchall()
+    updated = 0
+    for business in businesses:
+        if not business["email"]:
+            continue
+        query = f"from:{business['email']}"
+        results = service.users().messages().list(userId="me", q=query).execute()
+        messages = results.get("messages", [])
+        if messages:
+            cursor2 = db.cursor()
+            cursor2.execute("UPDATE businesses SET status = 'responded' WHERE id = %s", (business["id"],))
+            db.commit()
+            cursor2.close()
+            updated += 1
+    cursor.close()
+    db.close()
+    return f"Checked replies. {updated} businesses updated to responded."
+
+@app.route("/check_followups")
+def check_followups():
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    today = datetime.today().date()
+    cursor.execute("""
+        SELECT * FROM businesses
+        WHERE status = 'contacted'
+        AND followup_due IS NOT NULL
+        AND followup_due <= %s
+    """, (today,))
+    businesses = cursor.fetchall()
+    cursor.close()
+    db.close()
+    if not businesses:
+        return "No follow-ups due today."
+    for business in businesses:
+        followup_body = draft_followup_email(business["name"], business["type"], business["outreach_count"] + 1)
+        subject = f"Following up - {business['name']}"
+        approval_body = f"""A follow-up email is ready for your approval.
+
+Business: {business['name']}
+Email: {business['email']}
+Subject: {subject}
+
+--- DRAFT ---
+{followup_body}
+--- END DRAFT ---
+
+To approve and send, visit:
+https://outreach-agent-production.up.railway.app/approve_followup?id={business['id']}
+"""
+        send_email("podnarjoe@gmail.com", f"Follow-up ready for approval: {business['name']}", approval_body)
+        db = get_db()
+        cursor = db.cursor()
+        new_followup_due = today + timedelta(days=3)
+        cursor.execute("""
+            UPDATE businesses
+            SET followup_due = %s, outreach_count = outreach_count + 1, date_last_contacted = %s
+            WHERE id = %s
+        """, (new_followup_due, today, business["id"]))
+        db.commit()
+        cursor.close()
+        db.close()
+    return f"Follow-up emails sent for approval for {len(businesses)} businesses."
+
+@app.route("/approve_followup")
+def approve_followup():
+    business_id = request.args.get("id")
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM businesses WHERE id = %s", (business_id,))
+    business = cursor.fetchone()
+    cursor.close()
+    db.close()
+    if not business:
+        return "Business not found."
+    followup_body = draft_followup_email(business["name"], business["type"], business["outreach_count"])
+    subject = f"Following up - {business['name']}"
+    return render_template_string(DRAFT_PAGE,
+                                   email_body=followup_body,
+                                   business_name=business["name"],
+                                   business_email=business["email"],
+                                   business_website=business["website"],
+                                   business_type=business["type"],
+                                   subject=subject)
 
 @app.route("/find_businesses", methods=["POST"])
 def find_businesses_route():
