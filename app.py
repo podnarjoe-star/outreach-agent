@@ -167,7 +167,7 @@ input[type="text"], input[type="email"], textarea, select {
     padding: 11px 14px;
     border: 1.5px solid var(--border);
     border-radius: var(--radius-sm);
-    font-family: 'DM Sans', sans-serif;
+    font-family: 'Nunito Sans', sans-serif;
     font-size: 15px;
     color: var(--text);
     background: var(--warm-white);
