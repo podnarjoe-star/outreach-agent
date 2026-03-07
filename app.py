@@ -1,150 +1,682 @@
 import os
 from flask import Flask, request, render_template_string, redirect, url_for
 from datetime import datetime, timedelta
-from apscheduler.schedulers.background import BackgroundScheduler
 from database import get_db, init_db
 from email_utils import get_gmail_service, send_email
 from places import search_places
 from ai import draft_outreach_email, draft_followup_email
+from apscheduler.schedulers.background import BackgroundScheduler
 
 app = Flask(__name__)
 
+STYLES = """
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+    --cream: #FAF7F2;
+    --warm-white: #FFFDF9;
+    --tan: #E8DDD0;
+    --brown: #8B6F5C;
+    --dark-brown: #3D2B1F;
+    --accent: #C4956A;
+    --accent-hover: #B07D52;
+    --green: #5A8A6A;
+    --green-light: #EAF2EC;
+    --yellow-light: #FDF8E8;
+    --red-light: #FDECEA;
+    --blue-light: #EBF3FB;
+    --purple-light: #F3EEF8;
+    --text: #2C1A0E;
+    --text-muted: #7A6255;
+    --border: #E0D4C8;
+    --shadow: 0 2px 12px rgba(61,43,31,0.08);
+    --shadow-lg: 0 8px 32px rgba(61,43,31,0.12);
+    --radius: 12px;
+    --radius-sm: 8px;
+}
+
+body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--cream);
+    color: var(--text);
+    min-height: 100vh;
+    line-height: 1.6;
+}
+
+.nav {
+    background: var(--warm-white);
+    border-bottom: 1px solid var(--border);
+    padding: 0 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 64px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 1px 8px rgba(61,43,31,0.06);
+}
+
+.nav-brand {
+    font-family: 'Playfair Display', serif;
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--dark-brown);
+    text-decoration: none;
+    letter-spacing: -0.3px;
+}
+
+.nav-brand span {
+    color: var(--accent);
+}
+
+.nav-links {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.nav-link {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-decoration: none;
+    padding: 8px 16px;
+    border-radius: var(--radius-sm);
+    transition: all 0.2s;
+}
+
+.nav-link:hover {
+    background: var(--tan);
+    color: var(--dark-brown);
+}
+
+.nav-link.active {
+    background: var(--accent);
+    color: white;
+}
+
+.container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 40px 24px;
+}
+
+.container-sm {
+    max-width: 620px;
+    margin: 0 auto;
+    padding: 40px 24px;
+}
+
+.page-header {
+    margin-bottom: 32px;
+}
+
+.page-header h1 {
+    font-family: 'Playfair Display', serif;
+    font-size: 32px;
+    font-weight: 600;
+    color: var(--dark-brown);
+    letter-spacing: -0.5px;
+    margin-bottom: 6px;
+}
+
+.page-header p {
+    color: var(--text-muted);
+    font-size: 15px;
+}
+
+.card {
+    background: var(--warm-white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px;
+    box-shadow: var(--shadow);
+    margin-bottom: 24px;
+}
+
+.card-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--dark-brown);
+    margin-bottom: 20px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+}
+
+.form-group {
+    margin-bottom: 18px;
+}
+
+label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+}
+
+input[type="text"], input[type="email"], textarea, select {
+    width: 100%;
+    padding: 11px 14px;
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 15px;
+    color: var(--text);
+    background: var(--warm-white);
+    transition: border-color 0.2s, box-shadow 0.2s;
+    outline: none;
+}
+
+input[type="text"]:focus, input[type="email"]:focus, textarea:focus, select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(196,149,106,0.12);
+}
+
+textarea {
+    resize: vertical;
+    min-height: 260px;
+    line-height: 1.7;
+}
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 24px;
+    border-radius: var(--radius-sm);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s;
+    text-decoration: none;
+}
+
+.btn-primary {
+    background: var(--accent);
+    color: white;
+}
+
+.btn-primary:hover {
+    background: var(--accent-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(196,149,106,0.3);
+}
+
+.btn-secondary {
+    background: var(--tan);
+    color: var(--dark-brown);
+}
+
+.btn-secondary:hover {
+    background: var(--border);
+}
+
+.btn-blue {
+    background: #4A90C4;
+    color: white;
+}
+
+.btn-blue:hover {
+    background: #3A7AB0;
+    transform: translateY(-1px);
+}
+
+.btn-sm {
+    padding: 7px 14px;
+    font-size: 13px;
+}
+
+.grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+}
+
+.divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 32px 0;
+}
+
+/* Dashboard table */
+.table-wrap {
+    overflow-x: auto;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--warm-white);
+    font-size: 14px;
+}
+
+thead th {
+    background: var(--dark-brown);
+    color: rgba(255,255,255,0.85);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    padding: 14px 16px;
+    text-align: left;
+    white-space: nowrap;
+}
+
+tbody tr {
+    border-bottom: 1px solid var(--border);
+    transition: background 0.15s;
+}
+
+tbody tr:last-child { border-bottom: none; }
+tbody tr:hover { background: var(--cream); }
+
+td {
+    padding: 13px 16px;
+    vertical-align: middle;
+}
+
+td a {
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+td a:hover { text-decoration: underline; }
+
+.badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: capitalize;
+}
+
+.badge-contacted { background: var(--yellow-light); color: #8A6F00; }
+.badge-responded { background: var(--green-light); color: #2D6A3F; }
+.badge-not_interested { background: var(--red-light); color: #A33030; }
+.badge-converted { background: var(--blue-light); color: #1A5C9A; }
+.badge-pending { background: var(--purple-light); color: #5A3D8A; }
+
+.followup-due { color: #C0392B; font-weight: 700; }
+
+.status-select {
+    padding: 5px 10px;
+    font-size: 13px;
+    border-radius: 6px;
+    border: 1.5px solid var(--border);
+    background: var(--warm-white);
+    cursor: pointer;
+}
+
+.dashboard-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.action-group {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.stats-row {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 16px;
+    margin-bottom: 28px;
+}
+
+.stat-card {
+    background: var(--warm-white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    text-align: center;
+}
+
+.stat-number {
+    font-family: 'Playfair Display', serif;
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--dark-brown);
+    line-height: 1;
+    margin-bottom: 4px;
+}
+
+.stat-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.success-icon {
+    width: 64px;
+    height: 64px;
+    background: var(--green-light);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 20px;
+    font-size: 28px;
+}
+
+.success-card {
+    text-align: center;
+    padding: 48px 28px;
+}
+
+.success-card h2 {
+    font-family: 'Playfair Display', serif;
+    font-size: 26px;
+    color: var(--dark-brown);
+    margin-bottom: 10px;
+}
+
+.success-card p {
+    color: var(--text-muted);
+    margin-bottom: 6px;
+}
+
+.success-links {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    margin-top: 28px;
+}
+
+.to-field {
+    background: var(--cream);
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 11px 14px;
+    font-size: 15px;
+    color: var(--text-muted);
+    margin-bottom: 18px;
+}
+
+.to-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+}
+"""
+
+NAV = """
+<nav class="nav">
+    <a href="/" class="nav-brand">Outreach <span>Agent</span></a>
+    <div class="nav-links">
+        <a href="/" class="nav-link">New Outreach</a>
+        <a href="/dashboard" class="nav-link">Dashboard</a>
+        <a href="/check_replies" class="nav-link">Check Replies</a>
+        <a href="/check_followups" class="nav-link">Check Follow-ups</a>
+    </div>
+</nav>
+"""
+
 FORM_PAGE = """
 <!DOCTYPE html>
-<html>
-<head><title>Outreach Agent</title></head>
-<body style="font-family: Arial; max-width: 600px; margin: 50px auto; padding: 20px;">
-    <h2>Draft Outreach Email</h2>
-    <a href="/dashboard" style="float:right;">View Dashboard</a>
-    <form method="POST" action="/draft">
-        <label>Business Name:</label><br>
-        <input type="text" name="business_name" style="width:100%; padding:8px; margin:8px 0;"><br>
-        <label>Business Website:</label><br>
-        <input type="text" name="business_website" style="width:100%; padding:8px; margin:8px 0;"><br>
-        <label>Business Type:</label><br>
-        <input type="text" name="business_type" placeholder="e.g. hair salon, spa, esthetician" style="width:100%; padding:8px; margin:8px 0;"><br>
-        <label>Business Email:</label><br>
-        <input type="text" name="business_email" style="width:100%; padding:8px; margin:8px 0;"><br>
-        <button type="submit" style="padding:10px 20px; background:#4CAF50; color:white; border:none; cursor:pointer;">Draft Email</button>
-    </form>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Outreach Agent</title>
+<style>{{ styles }}</style>
+</head>
+<body>
+{{ nav }}
+<div class="container">
+    <div class="page-header">
+        <h1>Outreach Agent</h1>
+        <p>Draft personalized emails or discover new businesses to contact.</p>
+    </div>
 
-    <hr style="margin: 40px 0;">
+    <div class="grid-2">
+        <div class="card">
+            <div class="card-title">✉️ Draft Outreach Email</div>
+            <form method="POST" action="/draft">
+                <div class="form-group">
+                    <label>Business Name</label>
+                    <input type="text" name="business_name" placeholder="e.g. Glow Studio">
+                </div>
+                <div class="form-group">
+                    <label>Business Website</label>
+                    <input type="text" name="business_website" placeholder="e.g. glowstudio.com">
+                </div>
+                <div class="form-group">
+                    <label>Business Type</label>
+                    <input type="text" name="business_type" placeholder="e.g. hair salon, spa, esthetician">
+                </div>
+                <div class="form-group">
+                    <label>Business Email</label>
+                    <input type="text" name="business_email" placeholder="e.g. hello@glowstudio.com">
+                </div>
+                <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center;">
+                    Draft Email →
+                </button>
+            </form>
+        </div>
 
-    <h2>Find Businesses</h2>
-    <form method="POST" action="/find_businesses">
-        <label>City:</label><br>
-        <input type="text" name="city" placeholder="e.g. Cincinnati, OH" style="width:100%; padding:8px; margin:8px 0;"><br>
-        <label>Business Type:</label><br>
-        <input type="text" name="business_type" placeholder="e.g. hair salon, spa, esthetician" style="width:100%; padding:8px; margin:8px 0;"><br>
-        <button type="submit" style="padding:10px 20px; background:#2196F3; color:white; border:none; cursor:pointer;">Find Businesses</button>
-    </form>
+        <div class="card">
+            <div class="card-title">🔍 Find Businesses</div>
+            <form method="POST" action="/find_businesses">
+                <div class="form-group">
+                    <label>City</label>
+                    <input type="text" name="city" placeholder="e.g. Cincinnati, OH">
+                </div>
+                <div class="form-group">
+                    <label>Business Type</label>
+                    <input type="text" name="business_type" placeholder="e.g. hair salon, spa, esthetician">
+                </div>
+                <button type="submit" class="btn btn-blue" style="width:100%; justify-content:center; margin-top: 108px;">
+                    Find Businesses →
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
 </body>
 </html>
 """
 
 DRAFT_PAGE = """
 <!DOCTYPE html>
-<html>
-<head><title>Review Draft</title></head>
-<body style="font-family: Arial; max-width: 600px; margin: 50px auto; padding: 20px;">
-    <h2>Review & Edit Draft</h2>
-    <form method="POST" action="/approve">
-        <input type="hidden" name="business_email" value="{{ business_email }}">
-        <input type="hidden" name="business_name" value="{{ business_name }}">
-        <input type="hidden" name="business_website" value="{{ business_website }}">
-        <input type="hidden" name="business_type" value="{{ business_type }}">
-        <label><strong>To:</strong> {{ business_email }}</label><br><br>
-        <label><strong>Subject:</strong></label><br>
-        <input type="text" name="subject" value="{{ subject }}" style="width:100%; padding:8px; margin:8px 0;"><br>
-        <label><strong>Email Body:</strong></label><br>
-        <textarea name="email_body" style="width:100%; height:300px; padding:8px; margin:8px 0;">{{ email_body }}</textarea><br>
-        <button type="submit" style="padding:10px 20px; background:#4CAF50; color:white; border:none; cursor:pointer;">Send Email</button>
-    </form>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review Draft</title>
+<style>{{ styles }}</style>
+</head>
+<body>
+{{ nav }}
+<div class="container-sm">
+    <div class="page-header">
+        <h1>Review & Edit Draft</h1>
+        <p>Edit the email below then send when ready.</p>
+    </div>
+    <div class="card">
+        <form method="POST" action="/approve">
+            <input type="hidden" name="business_email" value="{{ business_email }}">
+            <input type="hidden" name="business_name" value="{{ business_name }}">
+            <input type="hidden" name="business_website" value="{{ business_website }}">
+            <input type="hidden" name="business_type" value="{{ business_type }}">
+            <div class="form-group">
+                <div class="to-label">To</div>
+                <div class="to-field">{{ business_email }}</div>
+            </div>
+            <div class="form-group">
+                <label>Subject</label>
+                <input type="text" name="subject" value="{{ subject }}">
+            </div>
+            <div class="form-group">
+                <label>Email Body</label>
+                <textarea name="email_body">{{ email_body }}</textarea>
+            </div>
+            <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center;">
+                Send Email →
+            </button>
+        </form>
+    </div>
+</div>
 </body>
 </html>
 """
 
 SENT_PAGE = """
 <!DOCTYPE html>
-<html>
-<head><title>Sent!</title></head>
-<body style="font-family: Arial; max-width: 600px; margin: 50px auto; padding: 20px;">
-    <h2>Email Sent!</h2>
-    <p>Your outreach email to <strong>{{ business_name }}</strong> has been sent successfully.</p>
-    <p>Follow-up scheduled for 3 days from now if no response.</p>
-    <a href="/">Draft another email</a> | <a href="/dashboard">View Dashboard</a>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Email Sent</title>
+<style>{{ styles }}</style>
+</head>
+<body>
+{{ nav }}
+<div class="container-sm">
+    <div class="card success-card">
+        <div class="success-icon">✓</div>
+        <h2>Email Sent!</h2>
+        <p>Your outreach email to <strong>{{ business_name }}</strong> has been sent.</p>
+        <p style="font-size:13px; margin-top:8px;">A follow-up will be queued in 3 days if there's no response.</p>
+        <div class="success-links">
+            <a href="/" class="btn btn-secondary">New Outreach</a>
+            <a href="/dashboard" class="btn btn-primary">View Dashboard</a>
+        </div>
+    </div>
+</div>
 </body>
 </html>
 """
 
 DASHBOARD_PAGE = """
 <!DOCTYPE html>
-<html>
-<head><title>Dashboard</title>
-<style>
-    body { font-family: Arial; max-width: 1000px; margin: 50px auto; padding: 20px; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 10px; border: 1px solid #ddd; text-align: left; }
-    th { background: #f4f4f4; }
-    .contacted { background: #fff9c4; }
-    .responded { background: #c8e6c9; }
-    .not_interested { background: #ffcdd2; }
-    .converted { background: #bbdefb; }
-    .pending { background: #f3e5f5; }
-    .followup-due { font-weight: bold; color: red; }
-</style>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard</title>
+<style>{{ styles }}</style>
 </head>
 <body>
-    <h2>Outreach Dashboard</h2>
-    <a href="/">+ New Outreach</a> |
-    <a href="/check_replies">Check Replies</a> |
-    <a href="/check_followups">Check Follow-ups</a>
-    <br><br>
-    <table>
-        <tr>
-            <th>Business</th>
-            <th>Type</th>
-            <th>Email</th>
-            <th>Status</th>
-            <th>First Contacted</th>
-            <th>Last Contacted</th>
-            <th>Follow-up Due</th>
-            <th>Outreach Count</th>
-            <th>Update Status</th>
-        </tr>
-        {% for b in businesses %}
-        <tr class="{{ b['status'] }}">
-            <td><a href="{{ b['website'] }}" target="_blank">{{ b['name'] }}</a></td>
-            <td>{{ b['type'] }}</td>
-            <td>{{ b['email'] }}</td>
-            <td>{{ b['status'] }}</td>
-            <td>{{ b['date_first_contacted'] }}</td>
-            <td>{{ b['date_last_contacted'] }}</td>
-            <td class="{{ 'followup-due' if b['followup_due'] and b['followup_due'] <= today else '' }}">{{ b['followup_due'] }}</td>
-            <td>{{ b['outreach_count'] }}</td>
-            <td>
-                <form method="POST" action="/update_status">
-                    <input type="hidden" name="business_id" value="{{ b['id'] }}">
-                    <select name="status">
-                        <option value="pending" {{ 'selected' if b['status'] == 'pending' }}>Pending</option>
-                        <option value="contacted" {{ 'selected' if b['status'] == 'contacted' }}>Contacted</option>
-                        <option value="responded" {{ 'selected' if b['status'] == 'responded' }}>Responded</option>
-                        <option value="not_interested" {{ 'selected' if b['status'] == 'not_interested' }}>Not Interested</option>
-                        <option value="converted" {{ 'selected' if b['status'] == 'converted' }}>Converted</option>
-                    </select>
-                    <button type="submit">Update</button>
-                </form>
-            </td>
-        </tr>
-        {% endfor %}
-    </table>
+{{ nav }}
+<div class="container">
+    <div class="page-header">
+        <h1>Outreach Dashboard</h1>
+        <p>Track and manage all your business outreach in one place.</p>
+    </div>
+
+    <div class="stats-row">
+        <div class="stat-card">
+            <div class="stat-number">{{ total }}</div>
+            <div class="stat-label">Total</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number" style="color:#8A6F00;">{{ contacted }}</div>
+            <div class="stat-label">Contacted</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number" style="color:#2D6A3F;">{{ responded }}</div>
+            <div class="stat-label">Responded</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number" style="color:#1A5C9A;">{{ converted }}</div>
+            <div class="stat-label">Converted</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number" style="color:#5A3D8A;">{{ pending }}</div>
+            <div class="stat-label">Pending</div>
+        </div>
+    </div>
+
+    <div class="dashboard-actions">
+        <div class="action-group">
+            <a href="/" class="btn btn-primary btn-sm">+ New Outreach</a>
+            <a href="/check_replies" class="btn btn-secondary btn-sm">Check Replies</a>
+            <a href="/check_followups" class="btn btn-secondary btn-sm">Check Follow-ups</a>
+        </div>
+    </div>
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Business</th>
+                    <th>Type</th>
+                    <th>Email</th>
+                    <th>Status</th>
+                    <th>First Contacted</th>
+                    <th>Last Contacted</th>
+                    <th>Follow-up Due</th>
+                    <th>Outreach #</th>
+                    <th>Update</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for b in businesses %}
+                <tr>
+                    <td><a href="{{ b['website'] }}" target="_blank">{{ b['name'] }}</a></td>
+                    <td>{{ b['type'] }}</td>
+                    <td style="font-size:13px;">{{ b['email'] }}</td>
+                    <td><span class="badge badge-{{ b['status'] }}">{{ b['status'] }}</span></td>
+                    <td style="font-size:13px;">{{ b['date_first_contacted'] }}</td>
+                    <td style="font-size:13px;">{{ b['date_last_contacted'] }}</td>
+                    <td style="font-size:13px;" class="{{ 'followup-due' if b['followup_due'] and b['followup_due'] <= today else '' }}">
+                        {{ b['followup_due'] or '—' }}
+                    </td>
+                    <td style="text-align:center;">{{ b['outreach_count'] }}</td>
+                    <td>
+                        <form method="POST" action="/update_status" style="display:flex; gap:6px; align-items:center;">
+                            <input type="hidden" name="business_id" value="{{ b['id'] }}">
+                            <select name="status" class="status-select">
+                                <option value="pending" {{ 'selected' if b['status'] == 'pending' }}>Pending</option>
+                                <option value="contacted" {{ 'selected' if b['status'] == 'contacted' }}>Contacted</option>
+                                <option value="responded" {{ 'selected' if b['status'] == 'responded' }}>Responded</option>
+                                <option value="not_interested" {{ 'selected' if b['status'] == 'not_interested' }}>Not Interested</option>
+                                <option value="converted" {{ 'selected' if b['status'] == 'converted' }}>Converted</option>
+                            </select>
+                            <button type="submit" class="btn btn-secondary btn-sm">Save</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
 </body>
 </html>
 """
 
+def render(template, **kwargs):
+    return render_template_string(template, styles=STYLES, nav=NAV, **kwargs)
+
 @app.route("/")
 def index():
-    return render_template_string(FORM_PAGE)
+    return render(FORM_PAGE)
 
 @app.route("/draft", methods=["POST"])
 def draft():
@@ -154,13 +686,13 @@ def draft():
     business_email = request.form.get("business_email", "")
     email_body = draft_outreach_email(business_name, business_website, business_type)
     subject = f"Quick question for {business_name}"
-    return render_template_string(DRAFT_PAGE,
-                                   email_body=email_body,
-                                   business_name=business_name,
-                                   business_email=business_email,
-                                   business_website=business_website,
-                                   business_type=business_type,
-                                   subject=subject)
+    return render(DRAFT_PAGE,
+                  email_body=email_body,
+                  business_name=business_name,
+                  business_email=business_email,
+                  business_website=business_website,
+                  business_type=business_type,
+                  subject=subject)
 
 @app.route("/approve", methods=["POST"])
 def approve():
@@ -182,7 +714,7 @@ def approve():
     db.commit()
     cursor.close()
     db.close()
-    return render_template_string(SENT_PAGE, business_name=business_name)
+    return render(SENT_PAGE, business_name=business_name)
 
 @app.route("/dashboard")
 def dashboard():
@@ -193,7 +725,14 @@ def dashboard():
     cursor.close()
     db.close()
     today = datetime.today().date()
-    return render_template_string(DASHBOARD_PAGE, businesses=businesses, today=today)
+    total = len(businesses)
+    contacted = sum(1 for b in businesses if b['status'] == 'contacted')
+    responded = sum(1 for b in businesses if b['status'] == 'responded')
+    converted = sum(1 for b in businesses if b['status'] == 'converted')
+    pending = sum(1 for b in businesses if b['status'] == 'pending')
+    return render(DASHBOARD_PAGE, businesses=businesses, today=today,
+                  total=total, contacted=contacted, responded=responded,
+                  converted=converted, pending=pending)
 
 @app.route("/update_status", methods=["POST"])
 def update_status():
@@ -229,7 +768,7 @@ def check_replies():
             updated += 1
     cursor.close()
     db.close()
-    return f"Checked replies. {updated} businesses updated to responded."
+    return redirect(url_for("dashboard"))
 
 @app.route("/check_followups")
 def check_followups():
@@ -246,7 +785,7 @@ def check_followups():
     cursor.close()
     db.close()
     if not businesses:
-        return "No follow-ups due today."
+        return redirect(url_for("dashboard"))
     for business in businesses:
         followup_body = draft_followup_email(business["name"], business["type"], business["outreach_count"] + 1)
         subject = f"Following up - {business['name']}"
@@ -275,7 +814,7 @@ https://outreach-agent-production.up.railway.app/approve_followup?id={business['
         db.commit()
         cursor.close()
         db.close()
-    return f"Follow-up emails sent for approval for {len(businesses)} businesses."
+    return redirect(url_for("dashboard"))
 
 @app.route("/approve_followup")
 def approve_followup():
@@ -290,13 +829,13 @@ def approve_followup():
         return "Business not found."
     followup_body = draft_followup_email(business["name"], business["type"], business["outreach_count"])
     subject = f"Following up - {business['name']}"
-    return render_template_string(DRAFT_PAGE,
-                                   email_body=followup_body,
-                                   business_name=business["name"],
-                                   business_email=business["email"],
-                                   business_website=business["website"],
-                                   business_type=business["type"],
-                                   subject=subject)
+    return render(DRAFT_PAGE,
+                  email_body=followup_body,
+                  business_name=business["name"],
+                  business_email=business["email"],
+                  business_website=business["website"],
+                  business_type=business["type"],
+                  subject=subject)
 
 @app.route("/find_businesses", methods=["POST"])
 def find_businesses_route():
@@ -317,7 +856,7 @@ def find_businesses_route():
     db.commit()
     cursor.close()
     db.close()
-    return redirect(url_for("dashboard") + f"?found={added}&city={city}")
+    return redirect(url_for("dashboard"))
 
 def scheduled_check_replies():
     with app.app_context():
