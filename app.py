@@ -673,7 +673,7 @@ DASHBOARD_PAGE = """
 """
 
 def render(template, **kwargs):
-    return render_template_string(template, styles=STYLES, nav=Markup(NAV), **kwargs)
+    return render_template_string(template, styles=Markup(STYLES), nav=Markup(NAV), **kwargs)
 
 @app.route("/")
 def index():
