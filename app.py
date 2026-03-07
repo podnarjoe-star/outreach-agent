@@ -1,5 +1,6 @@
 import os
-from flask import Flask, request, render_template_string, redirect, url_for, Markup
+from flask import Flask, request, render_template_string, redirect, url_for
+from markupsafe import Markup
 from datetime import datetime, timedelta
 from database import get_db, init_db
 from email_utils import get_gmail_service, send_email
