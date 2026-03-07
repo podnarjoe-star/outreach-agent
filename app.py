@@ -1,5 +1,5 @@
 import os
-from flask import Flask, request, render_template_string, redirect, url_for
+from flask import Flask, request, render_template_string, redirect, url_for, Markup
 from datetime import datetime, timedelta
 from database import get_db, init_db
 from email_utils import get_gmail_service, send_email
@@ -10,7 +10,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 app = Flask(__name__)
 
 STYLES = """
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600&family=DM+Sans:wght@300;400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700&family=Nunito+Sans:wght@300;400;500;600&display=swap');
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -38,7 +38,7 @@ STYLES = """
 }
 
 body {
-    font-family: 'DM Sans', sans-serif;
+    font-family: 'Nunito Sans', sans-serif;
     background: var(--cream);
     color: var(--text);
     min-height: 100vh;
@@ -60,7 +60,7 @@ body {
 }
 
 .nav-brand {
-    font-family: 'Playfair Display', serif;
+    font-family: 'Nunito', sans-serif;
     font-size: 22px;
     font-weight: 600;
     color: var(--dark-brown);
@@ -115,7 +115,7 @@ body {
 }
 
 .page-header h1 {
-    font-family: 'Playfair Display', serif;
+    font-family: 'Nunito', sans-serif;
     font-size: 32px;
     font-weight: 600;
     color: var(--dark-brown);
@@ -138,7 +138,7 @@ body {
 }
 
 .card-title {
-    font-family: 'Playfair Display', serif;
+    font-family: 'Nunito', sans-serif;
     font-size: 18px;
     font-weight: 600;
     color: var(--dark-brown);
@@ -352,7 +352,7 @@ td a:hover { text-decoration: underline; }
 }
 
 .stat-number {
-    font-family: 'Playfair Display', serif;
+    font-family: 'Nunito', sans-serif;
     font-size: 28px;
     font-weight: 600;
     color: var(--dark-brown);
@@ -386,7 +386,7 @@ td a:hover { text-decoration: underline; }
 }
 
 .success-card h2 {
-    font-family: 'Playfair Display', serif;
+    font-family: 'Nunito', sans-serif;
     font-size: 26px;
     color: var(--dark-brown);
     margin-bottom: 10px;
@@ -672,7 +672,7 @@ DASHBOARD_PAGE = """
 """
 
 def render(template, **kwargs):
-    return render_template_string(template, styles=STYLES, nav=NAV, **kwargs)
+    return render_template_string(template, styles=STYLES, nav=Markup(NAV), **kwargs)
 
 @app.route("/")
 def index():
