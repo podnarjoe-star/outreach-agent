@@ -1,12 +1,29 @@
 import os
-import json
-import base64
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
-from googleapiclient.discovery import build
+import smtplib
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+def send_email(to, subject, body):
+    email = os.environ.get("ZOHO_EMAIL")
+    password = os.environ.get("ZOHO_PASSWORD")
+    
+    msg = MIMEMultipart()
+    msg["From"] = email
+    msg["To"] = to
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "plain"))
+    
+    with smtplib.SMTP("smtp.zoho.com", 587) as server:
+        server.starttls()
+        server.login(email, password)
+        server.sendmail(email, to, msg.as_string())
 
 def get_gmail_service():
+    import json
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+    from googleapiclient.discovery import build
+    
     token_json = os.environ.get("GMAIL_TOKEN")
     creds_data = json.loads(token_json)
     creds = Credentials(
@@ -20,11 +37,3 @@ def get_gmail_service():
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
     return build("gmail", "v1", credentials=creds)
-
-def send_email(to, subject, body):
-    service = get_gmail_service()
-    message = MIMEText(body)
-    message["to"] = to
-    message["subject"] = subject
-    raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
-    service.users().messages().send(userId="me", body={"raw": raw}).execute()
