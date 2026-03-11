@@ -192,7 +192,7 @@ textarea {
     gap: 8px;
     padding: 12px 24px;
     border-radius: var(--radius-sm);
-    font-family: 'DM Sans', sans-serif;
+    font-family: 'Nunito Sans', sans-serif;
     font-size: 15px;
     font-weight: 600;
     cursor: pointer;
