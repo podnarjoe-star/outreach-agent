@@ -6,6 +6,7 @@ from database import get_db, init_db
 from email_utils import get_gmail_service, send_email
 from places import search_places
 from ai import draft_outreach_email, draft_followup_email
+from scraper import scrape_email
 from apscheduler.schedulers.background import BackgroundScheduler
 
 app = Flask(__name__)
@@ -310,6 +311,7 @@ td a:hover { text-decoration: underline; }
 .badge-not_interested { background: var(--red-light); color: #A33030; }
 .badge-converted { background: var(--blue-light); color: #1A5C9A; }
 .badge-pending { background: var(--purple-light); color: #5A3D8A; }
+.badge-needs_email { background: #FFF3E0; color: #E65100; }
 
 .followup-due { color: #C0392B; font-weight: 700; }
 
@@ -618,6 +620,7 @@ DASHBOARD_PAGE = """
             <a href="/" class="btn btn-primary btn-sm">+ New Outreach</a>
             <a href="/check_replies" class="btn btn-secondary btn-sm">Check Replies</a>
             <a href="/check_followups" class="btn btn-secondary btn-sm">Check Follow-ups</a>
+	    <a href="/scrape_emails" class="btn btn-secondary btn-sm">Scrape Emails</a>
         </div>
     </div>
 
@@ -654,6 +657,7 @@ DASHBOARD_PAGE = """
                             <input type="hidden" name="business_id" value="{{ b['id'] }}">
                             <select name="status" class="status-select">
                                 <option value="pending" {{ 'selected' if b['status'] == 'pending' }}>Pending</option>
+				<option value="needs_email" {{ 'selected' if b['status'] == 'needs_email' }}>Needs Email</option>
                                 <option value="contacted" {{ 'selected' if b['status'] == 'contacted' }}>Contacted</option>
                                 <option value="responded" {{ 'selected' if b['status'] == 'responded' }}>Responded</option>
                                 <option value="not_interested" {{ 'selected' if b['status'] == 'not_interested' }}>Not Interested</option>
@@ -898,6 +902,37 @@ def find_businesses_route():
         db.commit()
         cursor.close()
         db.close()
+        return redirect(url_for("dashboard"))
+    except Exception as e:
+        return render(ERROR_PAGE, error_message=str(e))
+
+@app.route("/scrape_emails")
+def scrape_emails():
+    try:
+        db = get_db()
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM businesses WHERE status = 'pending' AND (email IS NULL OR email = '')")
+        businesses = cursor.fetchall()
+        cursor.close()
+        db.close()
+
+        found = 0
+        not_found = 0
+
+        for business in businesses:
+            email = scrape_email(business["website"])
+            db = get_db()
+            cursor = db.cursor()
+            if email:
+                cursor.execute("UPDATE businesses SET email = %s WHERE id = %s", (email, business["id"]))
+                found += 1
+            else:
+                cursor.execute("UPDATE businesses SET status = 'needs_email' WHERE id = %s", (business["id"],))
+                not_found += 1
+            db.commit()
+            cursor.close()
+            db.close()
+
         return redirect(url_for("dashboard"))
     except Exception as e:
         return render(ERROR_PAGE, error_message=str(e))
