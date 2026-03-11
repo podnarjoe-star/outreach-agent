@@ -675,47 +675,87 @@ DASHBOARD_PAGE = """
 def render(template, **kwargs):
     return render_template_string(template, styles=Markup(STYLES), nav=Markup(NAV), **kwargs)
 
+ERROR_PAGE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Something went wrong</title>
+<style>{{ styles }}</style>
+</head>
+<body>
+{{ nav }}
+<div class="container-sm">
+    <div class="card success-card">
+        <div class="success-icon" style="background:#FDECEA; font-size:32px;">⚠️</div>
+        <h2>Something went wrong</h2>
+        <p>{{ error_message }}</p>
+        <div class="success-links">
+            <a href="/" class="btn btn-secondary">Go Home</a>
+            <a href="/dashboard" class="btn btn-primary">View Dashboard</a>
+        </div>
+    </div>
+</div>
+</body>
+</html>
+"""
+
+@app.errorhandler(500)
+def internal_error(e):
+    return render(ERROR_PAGE, error_message="An unexpected error occurred. Please try again."), 500
+
+@app.errorhandler(404)
+def not_found(e):
+    return render(ERROR_PAGE, error_message="Page not found."), 404
+
 @app.route("/")
 def index():
     return render(FORM_PAGE)
 
 @app.route("/draft", methods=["POST"])
 def draft():
-    business_name = request.form["business_name"]
-    business_website = request.form["business_website"]
-    business_type = request.form["business_type"]
-    business_email = request.form.get("business_email", "")
-    email_body = draft_outreach_email(business_name, business_website, business_type)
-    subject = f"Quick question for {business_name}"
-    return render(DRAFT_PAGE,
-                  email_body=email_body,
-                  business_name=business_name,
-                  business_email=business_email,
-                  business_website=business_website,
-                  business_type=business_type,
-                  subject=subject)
+    try:
+        business_name = request.form["business_name"]
+        business_website = request.form["business_website"]
+        business_type = request.form["business_type"]
+        business_email = request.form.get("business_email", "")
+        email_body = draft_outreach_email(business_name, business_website, business_type)
+        subject = f"Quick question for {business_name}"
+        return render(DRAFT_PAGE,
+                      email_body=email_body,
+                      business_name=business_name,
+                      business_email=business_email,
+                      business_website=business_website,
+                      business_type=business_type,
+                      subject=subject)
+    except Exception as e:
+        return render(ERROR_PAGE, error_message=str(e))
 
 @app.route("/approve", methods=["POST"])
 def approve():
-    business_name = request.form["business_name"]
-    business_email = request.form["business_email"]
-    business_website = request.form["business_website"]
-    business_type = request.form["business_type"]
-    email_body = request.form["email_body"]
-    subject = request.form["subject"]
-    send_email(business_email, subject, email_body)
-    today = datetime.today().date()
-    followup_due = today + timedelta(days=3)
-    db = get_db()
-    cursor = db.cursor()
-    cursor.execute("""
-        INSERT INTO businesses (name, website, email, type, status, date_first_contacted, date_last_contacted, followup_due, outreach_count)
-        VALUES (%s, %s, %s, %s, 'contacted', %s, %s, %s, 1)
-    """, (business_name, business_website, business_email, business_type, today, today, followup_due))
-    db.commit()
-    cursor.close()
-    db.close()
-    return render(SENT_PAGE, business_name=business_name)
+    try:
+        business_name = request.form["business_name"]
+        business_email = request.form["business_email"]
+        business_website = request.form["business_website"]
+        business_type = request.form["business_type"]
+        email_body = request.form["email_body"]
+        subject = request.form["subject"]
+        send_email(business_email, subject, email_body)
+        today = datetime.today().date()
+        followup_due = today + timedelta(days=3)
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("""
+            INSERT INTO businesses (name, website, email, type, status, date_first_contacted, date_last_contacted, followup_due, outreach_count)
+            VALUES (%s, %s, %s, %s, 'contacted', %s, %s, %s, 1)
+        """, (business_name, business_website, business_email, business_type, today, today, followup_due))
+        db.commit()
+        cursor.close()
+        db.close()
+        return render(SENT_PAGE, business_name=business_name)
+    except Exception as e:
+        return render(ERROR_PAGE, error_message=str(e))
 
 @app.route("/dashboard")
 def dashboard():
@@ -840,24 +880,27 @@ def approve_followup():
 
 @app.route("/find_businesses", methods=["POST"])
 def find_businesses_route():
-    city = request.form["city"]
-    business_type = request.form["business_type"]
-    businesses = search_places(city, business_type)
-    db = get_db()
-    cursor = db.cursor()
-    added = 0
-    for b in businesses:
-        cursor.execute("SELECT id FROM businesses WHERE name = %s", (b["name"],))
-        if not cursor.fetchone():
-            cursor.execute("""
-                INSERT INTO businesses (name, website, email, type, status, date_first_contacted, date_last_contacted, followup_due, outreach_count)
-                VALUES (%s, %s, %s, %s, 'pending', NULL, NULL, NULL, 0)
-            """, (b["name"], b["website"], "", b["type"]))
-            added += 1
-    db.commit()
-    cursor.close()
-    db.close()
-    return redirect(url_for("dashboard"))
+    try:
+        city = request.form["city"]
+        business_type = request.form["business_type"]
+        businesses = search_places(city, business_type)
+        db = get_db()
+        cursor = db.cursor()
+        added = 0
+        for b in businesses:
+            cursor.execute("SELECT id FROM businesses WHERE name = %s", (b["name"],))
+            if not cursor.fetchone():
+                cursor.execute("""
+                    INSERT INTO businesses (name, website, email, type, status, date_first_contacted, date_last_contacted, followup_due, outreach_count)
+                    VALUES (%s, %s, %s, %s, 'pending', NULL, NULL, NULL, 0)
+                """, (b["name"], b["website"], "", b["type"]))
+                added += 1
+        db.commit()
+        cursor.close()
+        db.close()
+        return redirect(url_for("dashboard"))
+    except Exception as e:
+        return render(ERROR_PAGE, error_message=str(e))
 
 def scheduled_check_replies():
     with app.app_context():
