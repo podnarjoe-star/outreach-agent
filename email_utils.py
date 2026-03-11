@@ -1,24 +1,32 @@
 import os
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import json
+import urllib.request
 
 def send_email(to, subject, body):
-    email = os.environ.get("ZOHO_EMAIL")
-    password = os.environ.get("ZOHO_PASSWORD")
+    api_key = os.environ.get("SENDGRID_API_KEY")
+    from_email = os.environ.get("ZOHO_EMAIL", "joe@tailoredbusiness.app")
     
-    msg = MIMEMultipart()
-    msg["From"] = email
-    msg["To"] = to
-    msg["Subject"] = subject
-    msg.attach(MIMEText(body, "plain"))
+    data = {
+        "personalizations": [{"to": [{"email": to}]}],
+        "from": {"email": from_email},
+        "subject": subject,
+        "content": [{"type": "text/plain", "value": body}]
+    }
     
-    with smtplib.SMTP_SSL("smtp.zoho.com", 465) as server:
-        server.login(email, password)
-        server.sendmail(email, to, msg.as_string())
+    req = urllib.request.Request(
+        "https://api.sendgrid.com/v3/mail/send",
+        data=json.dumps(data).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        },
+        method="POST"
+    )
+    
+    with urllib.request.urlopen(req) as response:
+        return response.status
 
 def get_gmail_service():
-    import json
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
     from googleapiclient.discovery import build
