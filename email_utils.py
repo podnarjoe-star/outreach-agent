@@ -4,6 +4,7 @@ import urllib.request
 
 def send_email(to, subject, body):
     api_key = os.environ.get("SENDGRID_API_KEY")
+    print(f"SENDGRID KEY FOUND: {bool(api_key)}, starts with SG: {str(api_key).startswith('SG.')}")
     from_email = os.environ.get("ZOHO_EMAIL", "joe@tailoredbusiness.app")
     
     data = {
