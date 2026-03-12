@@ -575,6 +575,55 @@ SENT_PAGE = """
 </html>
 """
 
+EDIT_PAGE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Edit Business</title>
+<style>{{ styles }}</style>
+</head>
+<body>
+{{ nav }}
+<div class="container-sm">
+    <div class="page-header">
+        <h1>Edit Business</h1>
+        <p>Update the details for {{ business.name }}.</p>
+    </div>
+    <div class="card">
+        <form method="POST" action="/update_business/{{ business.id }}">
+            <div class="form-group">
+                <label>Business Name</label>
+                <input type="text" name="name" value="{{ business.name }}">
+            </div>
+            <div class="form-group">
+                <label>Website</label>
+                <input type="text" name="website" value="{{ business.website }}">
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="text" name="email" value="{{ business.email or '' }}">
+            </div>
+            <div class="form-group">
+                <label>Business Type</label>
+                <input type="text" name="type" value="{{ business.type }}">
+            </div>
+            <div class="form-group">
+                <label>Notes</label>
+                <textarea name="notes" style="min-height:100px;">{{ business.notes or '' }}</textarea>
+            </div>
+            <div style="display:flex; gap:12px;">
+                <button type="submit" class="btn btn-primary">Save Changes</button>
+                <a href="/dashboard" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+</body>
+</html>
+"""
+
 DASHBOARD_PAGE = """
 <!DOCTYPE html>
 <html lang="en">
@@ -642,7 +691,10 @@ DASHBOARD_PAGE = """
             <tbody>
                 {% for b in businesses %}
                 <tr>
-                    <td><a href="{{ b['website'] }}" target="_blank">{{ b['name'] }}</a></td>
+                    <td>
+                        <a href="{{ b['website'] }}" target="_blank">{{ b['name'] }}</a>
+                        <a href="/edit_business/{{ b['id'] }}" style="font-size:11px; margin-left:6px; color:var(--text-muted);">edit</a>
+                    </td>
                     <td>{{ b['type'] }}</td>
                     <td style="font-size:13px;">{{ b['email'] }}</td>
                     <td><span class="badge badge-{{ b['status'] }}">{{ b['status'] }}</span></td>
@@ -933,6 +985,44 @@ def scrape_emails():
             cursor.close()
             db.close()
 
+        return redirect(url_for("dashboard"))
+    except Exception as e:
+        return render(ERROR_PAGE, error_message=str(e))
+
+@app.route("/edit_business/<int:business_id>")
+def edit_business(business_id):
+    try:
+        db = get_db()
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM businesses WHERE id = %s", (business_id,))
+        business = cursor.fetchone()
+        cursor.close()
+        db.close()
+        if not business:
+            return render(ERROR_PAGE, error_message="Business not found.")
+        return render(EDIT_PAGE, business=business)
+    except Exception as e:
+        return render(ERROR_PAGE, error_message=str(e))
+
+@app.route("/update_business/<int:business_id>", methods=["POST"])
+def update_business(business_id):
+    try:
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("""
+            UPDATE businesses SET name=%s, website=%s, email=%s, type=%s, notes=%s
+            WHERE id = %s
+        """, (
+            request.form["name"],
+            request.form["website"],
+            request.form["email"],
+            request.form["type"],
+            request.form["notes"],
+            business_id
+        ))
+        db.commit()
+        cursor.close()
+        db.close()
         return redirect(url_for("dashboard"))
     except Exception as e:
         return render(ERROR_PAGE, error_message=str(e))
