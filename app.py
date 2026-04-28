@@ -1109,10 +1109,17 @@ def migrate_db():
     try:
         db = get_db()
         cursor = db.cursor()
-        cursor.execute("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS draft_subject VARCHAR(255)")
-        cursor.execute("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS draft_email TEXT")
-        cursor.execute("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS draft_status VARCHAR(50) DEFAULT NULL")
-        db.commit()
+        # Add columns one at a time, ignore errors if they already exist
+        for sql in [
+            "ALTER TABLE businesses ADD COLUMN draft_subject VARCHAR(255)",
+            "ALTER TABLE businesses ADD COLUMN draft_email TEXT",
+            "ALTER TABLE businesses ADD COLUMN draft_status VARCHAR(50) DEFAULT NULL"
+        ]:
+            try:
+                cursor.execute(sql)
+                db.commit()
+            except Exception:
+                pass  # Column already exists, skip
         cursor.close()
         db.close()
         return "Migration complete!"
