@@ -658,6 +658,23 @@ APPROVAL_QUEUE_PAGE = """
             </div>
             <div style="display:flex; gap:8px;">
                 <form method="POST" action="/approve_draft/{{ b['id'] }}">
+<button type="submit" class="btn btn-primary btn-sm">Send ✓</button>
+                </form>
+                <form method="POST" action="/skip_draft/{{ b['id'] }}">
+                    <button type="submit" class="btn btn-secondary btn-sm">Skip ✗</button>
+                </form>
+            </div>
+        </div>
+        <div style="font-size:13px; color:var(--text-muted); margin-bottom:8px;">
+            <strong>Subject:</strong> {{ b['draft_subject'] }}
+        </div>
+        <div style="background:var(--cream); border-radius:var(--radius-sm); padding:16px; font-size:14px; line-height:1.7; white-space:pre-wrap;">{{ b['draft_email'] }}</div>
+    </div>
+    {% endfor %}
+</div>
+</body>
+</html>
+"""
 
 DASHBOARD_PAGE = """
 <!DOCTYPE html>
