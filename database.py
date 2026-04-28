@@ -15,6 +15,21 @@ def get_db():
     except Error as e:
         raise Exception(f"Database connection failed: {str(e)}")
 
+@app.route("/migrate_db")
+def migrate_db():
+    try:
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS draft_subject VARCHAR(255)")
+        cursor.execute("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS draft_email TEXT")
+        cursor.execute("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS draft_status VARCHAR(50) DEFAULT NULL")
+        db.commit()
+        cursor.close()
+        db.close()
+        return "Migration complete!"
+    except Exception as e:
+        return f"Migration error: {str(e)}"
+
 def init_db():
     try:
         db = get_db()
@@ -31,7 +46,10 @@ def init_db():
                 date_last_contacted DATE,
                 followup_due DATE,
                 outreach_count INT DEFAULT 1,
-                notes TEXT
+                notes TEXT,
+		draft_subject VARCHAR(255),
+		draft_email TEXT,
+		draft_status VARCHAR(50) DEFAULT NULL
             )
         """)
         db.commit()
