@@ -435,6 +435,7 @@ NAV = """
         <a href="/dashboard" class="nav-link">Dashboard</a>
         <a href="/check_replies" class="nav-link">Check Replies</a>
         <a href="/check_followups" class="nav-link">Check Follow-ups</a>
+	<a href="/approval_queue" class="nav-link">Approval Queue</a>
     </div>
 </nav>
 """
@@ -623,6 +624,40 @@ EDIT_PAGE = """
 </body>
 </html>
 """
+
+APPROVAL_QUEUE_PAGE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Approval Queue</title>
+<style>{{ styles }}</style>
+</head>
+<body>
+{{ nav }}
+<div class="container">
+    <div class="page-header">
+        <h1>Approval Queue</h1>
+        <p>Review and approve outreach emails before they are sent.</p>
+    </div>
+
+    {% if not businesses %}
+    <div class="card" style="text-align:center; padding:48px;">
+        <p style="font-size:18px; color:var(--text-muted);">No emails pending approval.</p>
+        <a href="/" class="btn btn-primary" style="margin-top:20px;">Find Businesses</a>
+    </div>
+    {% endif %}
+
+    {% for b in businesses %}
+    <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px;">
+            <div>
+                <div style="font-family:'Nunito',sans-serif; font-size:18px; font-weight:600; color:var(--dark-brown);">{{ b['name'] }}</div>
+                <div style="font-size:13px; color:var(--text-muted); margin-top:2px;">{{ b['email'] }} · {{ b['type'] }}</div>
+            </div>
+            <div style="display:flex; gap:8px;">
+                <form method="POST" action="/approve_draft/{{ b['id'] }}">
 
 DASHBOARD_PAGE = """
 <!DOCTYPE html>
@@ -942,7 +977,7 @@ def find_businesses_route():
         businesses = search_places(city, business_type)
         db = get_db()
         cursor = db.cursor()
-        added = 0
+        added = []
         for b in businesses:
             cursor.execute("SELECT id FROM businesses WHERE name = %s", (b["name"],))
             if not cursor.fetchone():
@@ -950,11 +985,47 @@ def find_businesses_route():
                     INSERT INTO businesses (name, website, email, type, status, date_first_contacted, date_last_contacted, followup_due, outreach_count)
                     VALUES (%s, %s, %s, %s, 'pending', NULL, NULL, NULL, 0)
                 """, (b["name"], b["website"], "", b["type"]))
-                added += 1
+                added.append({"name": b["name"], "website": b["website"], "type": b["type"]})
         db.commit()
         cursor.close()
         db.close()
-        return redirect(url_for("dashboard"))
+
+        # Auto-scrape emails for newly added businesses
+        for b in added:
+            email = scrape_email(b["website"])
+            db = get_db()
+            cursor = db.cursor()
+            if email:
+                cursor.execute("UPDATE businesses SET email = %s WHERE name = %s AND status = 'pending'", (email, b["name"]))
+            else:
+                cursor.execute("UPDATE businesses SET status = 'needs_email' WHERE name = %s AND status = 'pending'", (b["name"],))
+            db.commit()
+            cursor.close()
+            db.close()
+
+        # Auto-draft emails for businesses that have emails
+        db = get_db()
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM businesses WHERE status = 'pending' AND email IS NOT NULL AND email != '' AND draft_email IS NULL")
+        to_draft = cursor.fetchall()
+        cursor.close()
+        db.close()
+
+        for b in to_draft:
+            try:
+                email_body = draft_outreach_email(b["name"], b["website"], b["type"])
+                subject = f"Quick question for {b['name']}"
+                db = get_db()
+                cursor = db.cursor()
+                cursor.execute("UPDATE businesses SET draft_email = %s, draft_subject = %s, draft_status = 'pending_approval' WHERE id = %s",
+                               (email_body, subject, b["id"]))
+                db.commit()
+                cursor.close()
+                db.close()
+            except Exception:
+                pass
+
+        return redirect(url_for("approval_queue"))
     except Exception as e:
         return render(ERROR_PAGE, error_message=str(e))
 
@@ -1125,6 +1196,62 @@ def migrate_db():
         return "Migration complete!"
     except Exception as e:
         return f"Migration error: {str(e)}"
+
+@app.route("/approval_queue")
+def approval_queue():
+    try:
+        db = get_db()
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM businesses WHERE draft_status = 'pending_approval' ORDER BY id DESC")
+        businesses = cursor.fetchall()
+        cursor.close()
+        db.close()
+        return render(APPROVAL_QUEUE_PAGE, businesses=businesses)
+    except Exception as e:
+        return render(ERROR_PAGE, error_message=str(e))
+
+@app.route("/approve_draft/<int:business_id>", methods=["POST"])
+def approve_draft(business_id):
+    try:
+        db = get_db()
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM businesses WHERE id = %s", (business_id,))
+        business = cursor.fetchone()
+        cursor.close()
+        db.close()
+
+        send_email(business["email"], business["draft_subject"], business["draft_email"])
+
+        today = datetime.today().date()
+        followup_due = today + timedelta(days=3)
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("""
+            UPDATE businesses
+            SET status = 'contacted', draft_status = 'sent',
+            date_first_contacted = %s, date_last_contacted = %s,
+            followup_due = %s, outreach_count = 1
+            WHERE id = %s
+        """, (today, today, followup_due, business_id))
+        db.commit()
+        cursor.close()
+        db.close()
+        return redirect(url_for("approval_queue"))
+    except Exception as e:
+        return render(ERROR_PAGE, error_message=str(e))
+
+@app.route("/skip_draft/<int:business_id>", methods=["POST"])
+def skip_draft(business_id):
+    try:
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("UPDATE businesses SET draft_status = 'skipped' WHERE id = %s", (business_id,))
+        db.commit()
+        cursor.close()
+        db.close()
+        return redirect(url_for("approval_queue"))
+    except Exception as e:
+        return render(ERROR_PAGE, error_message=str(e))
 
 init_db()
 
