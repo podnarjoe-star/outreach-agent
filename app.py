@@ -1104,6 +1104,21 @@ scheduler.add_job(scheduled_check_replies, 'interval', hours=1)
 scheduler.add_job(scheduled_check_followups, 'cron', hour=9, minute=0)
 scheduler.start()
 
+@app.route("/migrate_db")
+def migrate_db():
+    try:
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS draft_subject VARCHAR(255)")
+        cursor.execute("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS draft_email TEXT")
+        cursor.execute("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS draft_status VARCHAR(50) DEFAULT NULL")
+        db.commit()
+        cursor.close()
+        db.close()
+        return "Migration complete!"
+    except Exception as e:
+        return f"Migration error: {str(e)}"
+
 init_db()
 
 if __name__ == "__main__":
