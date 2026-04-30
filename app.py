@@ -589,10 +589,12 @@ EDIT_PAGE = """
 {{ nav }}
 <div class="container-sm">
     <div class="page-header">
-        <h1>Edit Business</h1>
-        <p>Update the details for {{ business.name }}.</p>
+        <h1>Edit Prospect</h1>
+        <p>Update details for {{ business.name }}.</p>
     </div>
+
     <div class="card">
+        <div class="card-title">Prospect Details</div>
         <form method="POST" action="/update_business/{{ business.id }}">
             <div class="form-group">
                 <label>Business Name</label>
@@ -611,6 +613,21 @@ EDIT_PAGE = """
                 <input type="text" name="type" value="{{ business.type }}">
             </div>
             <div class="form-group">
+                <label>Status</label>
+                <select name="status">
+                    <option value="pending" {{ 'selected' if business.status == 'pending' }}>Pending</option>
+                    <option value="needs_email" {{ 'selected' if business.status == 'needs_email' }}>Needs Email</option>
+                    <option value="contacted" {{ 'selected' if business.status == 'contacted' }}>Contacted</option>
+                    <option value="responded" {{ 'selected' if business.status == 'responded' }}>Responded</option>
+                    <option value="not_interested" {{ 'selected' if business.status == 'not_interested' }}>Not Interested</option>
+                    <option value="converted" {{ 'selected' if business.status == 'converted' }}>Converted</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Follow-up Date</label>
+                <input type="text" name="followup_due" value="{{ business.followup_due or '' }}" placeholder="YYYY-MM-DD">
+            </div>
+            <div class="form-group">
                 <label>Notes</label>
                 <textarea name="notes" style="min-height:100px;">{{ business.notes or '' }}</textarea>
             </div>
@@ -619,6 +636,22 @@ EDIT_PAGE = """
                 <a href="/dashboard" class="btn btn-secondary">Cancel</a>
             </div>
         </form>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Actions</div>
+        <div style="display:flex; flex-direction:column; gap:12px;">
+            <form method="POST" action="/remove_followup/{{ business.id }}">
+                <button type="submit" class="btn btn-secondary" style="width:100%; justify-content:center;">
+                    🔕 Remove from Follow-up Cadence
+                </button>
+            </form>
+            <form method="POST" action="/delete_business/{{ business.id }}">
+                <button type="submit" class="btn btn-secondary" style="width:100%; justify-content:center; background:#FDECEA; color:#A33030;" onclick="return confirm('Delete this prospect permanently? This cannot be undone.')">
+                    🗑 Delete Prospect
+                </button>
+            </form>
+        </div>
     </div>
 </div>
 </body>
@@ -1097,17 +1130,46 @@ def update_business(business_id):
     try:
         db = get_db()
         cursor = db.cursor()
+        followup_due = request.form.get("followup_due") or None
         cursor.execute("""
-            UPDATE businesses SET name=%s, website=%s, email=%s, type=%s, notes=%s
+            UPDATE businesses SET name=%s, website=%s, email=%s, type=%s, notes=%s, status=%s, followup_due=%s
             WHERE id = %s
         """, (
             request.form["name"],
             request.form["website"],
             request.form["email"],
             request.form["type"],
-            request.form["notes"],
+            request.form.get("notes", ""),
+            request.form["status"],
+            followup_due,
             business_id
         ))
+        db.commit()
+        cursor.close()
+        db.close()
+        return redirect(url_for("dashboard"))
+    except Exception as e:
+        return render(ERROR_PAGE, error_message=str(e))
+
+@app.route("/delete_business/<int:business_id>", methods=["POST"])
+def delete_business(business_id):
+    try:
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("DELETE FROM businesses WHERE id = %s", (business_id,))
+        db.commit()
+        cursor.close()
+        db.close()
+        return redirect(url_for("dashboard"))
+    except Exception as e:
+        return render(ERROR_PAGE, error_message=str(e))
+
+@app.route("/remove_followup/<int:business_id>", methods=["POST"])
+def remove_followup(business_id):
+    try:
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("UPDATE businesses SET followup_due = NULL WHERE id = %s", (business_id,))
         db.commit()
         cursor.close()
         db.close()
