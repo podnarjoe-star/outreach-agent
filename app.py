@@ -1217,7 +1217,7 @@ def scheduled_check_followups():
             db = get_db()
             cursor = db.cursor(dictionary=True)
             today = datetime.today().date()
-           cursor.execute("""
+            cursor.execute("""
     		SELECT * FROM businesses
     		WHERE status = 'contacted'
     		AND followup_due IS NOT NULL
