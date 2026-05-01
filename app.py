@@ -627,6 +627,13 @@ EDIT_PAGE = """
                 <label>Follow-up Date</label>
                 <input type="text" name="followup_due" value="{{ business.followup_due or '' }}" placeholder="YYYY-MM-DD">
             </div>
+	    <div class="form-group">
+                <label>Follow-up Cadence</label>
+                <select name="in_cadence">
+                    <option value="1" {{ 'selected' if business.in_cadence != 0 }}>Active</option>
+                    <option value="0" {{ 'selected' if business.in_cadence == 0 }}>Removed</option>
+                </select>
+            </div>
             <div class="form-group">
                 <label>Notes</label>
                 <textarea name="notes" style="min-height:100px;">{{ business.notes or '' }}</textarea>
@@ -962,6 +969,7 @@ def check_followups():
         WHERE status = 'contacted'
         AND followup_due IS NOT NULL
         AND followup_due <= %s
+	AND in_cadence = 1
     """, (today,))
     businesses = cursor.fetchall()
     cursor.close()
@@ -1132,7 +1140,7 @@ def update_business(business_id):
         cursor = db.cursor()
         followup_due = request.form.get("followup_due") or None
         cursor.execute("""
-            UPDATE businesses SET name=%s, website=%s, email=%s, type=%s, notes=%s, status=%s, followup_due=%s
+            UPDATE businesses SET name=%s, website=%s, email=%s, type=%s, notes=%s, status=%s, followup_due=%s, in_cadence=%s
             WHERE id = %s
         """, (
             request.form["name"],
@@ -1142,6 +1150,7 @@ def update_business(business_id):
             request.form.get("notes", ""),
             request.form["status"],
             followup_due,
+            request.form.get("in_cadence", 1),
             business_id
         ))
         db.commit()
@@ -1169,7 +1178,7 @@ def remove_followup(business_id):
     try:
         db = get_db()
         cursor = db.cursor()
-        cursor.execute("UPDATE businesses SET followup_due = NULL WHERE id = %s", (business_id,))
+        cursor.execute("UPDATE businesses SET followup_due = NULL, in_cadence = 0 WHERE id = %s", (business_id,))
         db.commit()
         cursor.close()
         db.close()
@@ -1208,12 +1217,13 @@ def scheduled_check_followups():
             db = get_db()
             cursor = db.cursor(dictionary=True)
             today = datetime.today().date()
-            cursor.execute("""
-                SELECT * FROM businesses
-                WHERE status = 'contacted'
-                AND followup_due IS NOT NULL
-                AND followup_due <= %s
-            """, (today,))
+           cursor.execute("""
+    		SELECT * FROM businesses
+    		WHERE status = 'contacted'
+    		AND followup_due IS NOT NULL
+    		AND followup_due <= %s
+    		AND in_cadence = 1
+	    """, (today,))
             businesses = cursor.fetchall()
             cursor.close()
             db.close()
@@ -1259,17 +1269,17 @@ def migrate_db():
     try:
         db = get_db()
         cursor = db.cursor()
-        # Add columns one at a time, ignore errors if they already exist
         for sql in [
             "ALTER TABLE businesses ADD COLUMN draft_subject VARCHAR(255)",
             "ALTER TABLE businesses ADD COLUMN draft_email TEXT",
-            "ALTER TABLE businesses ADD COLUMN draft_status VARCHAR(50) DEFAULT NULL"
+            "ALTER TABLE businesses ADD COLUMN draft_status VARCHAR(50) DEFAULT NULL",
+            "ALTER TABLE businesses ADD COLUMN in_cadence TINYINT(1) DEFAULT 1"
         ]:
             try:
                 cursor.execute(sql)
                 db.commit()
             except Exception:
-                pass  # Column already exists, skip
+                pass
         cursor.close()
         db.close()
         return "Migration complete!"
