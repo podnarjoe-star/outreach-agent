@@ -11,16 +11,24 @@ def draft_outreach_email(business_name, business_website, business_type):
             messages=[
                 {
                     "role": "user",
-                    "content": f"""You are helping draft a personalized cold outreach email to a small beauty/wellness business.
-Business Name: {business_name}
-Business Website: {business_website}
-Business Type: {business_type}
-Draft a short, friendly, personalized outreach email introducing a service that creates a 24/7 online booking page for their clients.
-- Keep it under 150 words
-- Sound human, not salesy
-- Reference something specific about their business
-- End with a simple call to action
-Return only the email body, no subject line."""
+                    "content": f"""Write a short cold outreach email to a small beauty or wellness business.
+
+Use EXACTLY this format and do not deviate from it:
+
+Hi [Name],
+
+I help Hair Salons, Barber Shops and other businesses simplify the boring, repetitive stuff — so you can focus on clients instead of admin.
+
+What's the one thing in your day-to-day that you wish you didn't have to deal with?
+
+Joe
+
+Rules:
+- Replace [Name] with the actual business name: {business_name}
+- Do not add any extra sentences, fluff, or pleasantries
+- Do not mention the website or any specific details about their business
+- Do not add a closing line like "looking forward to hearing from you"
+- Return only the email body, no subject line"""
                 }
             ]
         )
@@ -40,15 +48,25 @@ def draft_followup_email(business_name, business_type, followup_number):
             messages=[
                 {
                     "role": "user",
-                    "content": f"""Draft a short friendly follow-up email to a beauty/wellness business that hasn't responded to our first outreach.
-Business Name: {business_name}
-Business Type: {business_type}
-This is follow-up number {followup_number}.
-- Keep it under 100 words
-- Be friendly, not pushy
-- Reference that we reached out before
-- End with a simple call to action
-Return only the email body, no subject line."""
+                    "content": f"""Write a short follow-up email to a beauty or wellness business that hasn't responded to our first email.
+
+Use EXACTLY this format:
+
+Hi [Name],
+
+Quick thought — 47% of salon bookings happen while you're asleep or spending time with family.
+
+If you're not set up to capture those, you're likely losing clients to whoever is.
+
+Still curious what's taking up most of your time — worth a quick chat?
+
+Joe
+
+Rules:
+- Replace [Name] with the actual business name: {business_name}
+- Do not change any of the wording above
+- Do not add extra sentences or fluff
+- Return only the email body, no subject line"""
                 }
             ]
         )
